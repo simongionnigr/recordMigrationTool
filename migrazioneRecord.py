@@ -9,6 +9,7 @@ class MigrationToolApp(tk.Tk):
         self._create_widgets()
 
     def _create_widgets(self):
+        
         # Frame principale: due colonne
         main_frame = ttk.Frame(self, padding=10)
         main_frame.pack(fill="both", expand=True)
