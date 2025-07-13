@@ -1,0 +1,10 @@
+# Ignora i byte-compiled Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# (Opzionale) altri file che di solito non vuoi versionare
+*.log
+*.sqlite3
+*.env
+.envrc
