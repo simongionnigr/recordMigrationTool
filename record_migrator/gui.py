@@ -2,32 +2,27 @@ import os
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import pandas as pd
-import yaml
 from simple_salesforce import Salesforce
+import yaml
 
-# Caricamento configurazione YAML
-CONFIG_FILE = "config.yaml"
-DEFAULT_CONFIG = {
-    "query_csv": {
-        "columns": ["sobject_api", "soql"],
-        "prompt": "Carica file query CSV",
-        "filetypes": [("CSV file", "*.csv")],
-        "separator": ","
-    }
-}
-if os.path.exists(CONFIG_FILE):
-    with open(CONFIG_FILE) as f:
-        CONFIG = yaml.safe_load(f)
-else:
-    CONFIG = DEFAULT_CONFIG
+import pandas as pd
+
+from config import load_config, save_config, CONFIG_FILE
+from sf_client import SalesforceClient
+from excel_utils import read_spreadsheet, write_spreadsheet
+
+# Carica la configurazione YAML
+CONFIG = load_config()
 
 class MigrationToolApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Salesforce Data Migrator")
-        self.geometry("700x600")
+        self.geometry("900x600")
+
+        self.sf_client = None
         self.query_df = None
+
         self._create_widgets()
 
     def _create_widgets(self):
@@ -138,92 +133,6 @@ class MigrationToolApp(tk.Tk):
             self.env_frame.grid_remove()
             self.query_frame.grid_remove()
 
-    def _select_file(self):
-        # Configura i filtri in base al tipo di file selezionato
-        types = [("CSV file", "*.csv")] if self.file_type.get() == "CSV" else [("Excel file", "*.xlsx")]
-        # Apri la finestra di dialogo per la selezione
-        path = filedialog.askopenfilename(filetypes=types)
-        # Mostra il percorso selezionato o un messaggio di default
-        display = path or "Nessun file selezionato"
-        self.file_label.config(text=display)
-
-        # Se è stato scelto un file, aggiorna il config.yml
-        if path:
-            self._update_config_with_input_table_path(path)
-            # Se è un Excel e siamo in modalità FILE, mostro subito le tab
-            if self.source_mode.get() == "file" and path.lower().endswith((".xls", ".xlsx")):
-                self._show_excel_tabs(path)
-
-    def _show_excel_tabs(self, path):
-        """
-        Apre una finestra con un Notebook: ogni tab è un foglio Excel (o il CSV).
-        """
-        try:
-            ext = os.path.splitext(path)[1].lower()
-            if ext in (".xls", ".xlsx"):
-                sheets = pd.read_excel(path, sheet_name=None)
-            elif ext == ".csv":
-                df = pd.read_csv(path)
-                sheets = {os.path.basename(path): df}
-            else:
-                messagebox.showwarning("Formato non supportato",
-                                       f"Non posso anteprimare {path}")
-                return
-        except Exception as e:
-            messagebox.showerror("Errore lettura file", str(e))
-            return
-
-        # Nuova finestra di anteprima
-        win = tk.Toplevel(self)
-        win.title(f"Anteprima: {os.path.basename(path)}")
-        win.geometry("800x600")
-
-        notebook = ttk.Notebook(win)
-        notebook.pack(fill="both", expand=True)
-
-        for sheet_name, df in sheets.items():
-            frame = ttk.Frame(notebook)
-            notebook.add(frame, text=sheet_name[:31])
-
-            # Tableau scrollabile
-            tree = ttk.Treeview(frame, columns=list(df.columns), show="headings")
-            vsb = ttk.Scrollbar(frame, orient="vertical",   command=tree.yview)
-            hsb = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
-            tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
-            tree.grid(row=0, column=0, sticky="nsew")
-            vsb.grid(row=0, column=1, sticky="ns")
-            hsb.grid(row=1, column=0, sticky="ew")
-            frame.rowconfigure(0, weight=1)
-            frame.columnconfigure(0, weight=1)
-
-            # Intestazioni e colonne
-            for col in df.columns:
-                tree.heading(col, text=col)
-                tree.column(col, width=100, anchor="w")
-
-            # Righe
-            for _, row in df.iterrows():
-                tree.insert("", "end", values=[row[c] for c in df.columns])
-            
-
-    def _update_config_with_input_table_path(self, path):
-        try:
-            # Leggi la configurazione esistente
-            with open(CONFIG_FILE, "r") as f:
-                cfg = yaml.safe_load(f)
-            # Imposta o sovrascrive il parametro input_tables
-            cfg["input_tables"] = path
-            # Scrivi nuovamente il file YAML
-            with open(CONFIG_FILE, "w") as f:
-                yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=False)
-        except Exception as e:
-            messagebox.showwarning(
-                "Impossibile aggiornare config",
-                f"Errore durante il salvataggio di input_tables in {CONFIG_FILE}:\n{e}"
-                )
-        
-
     def _load_query_csv(self):
         path = filedialog.askopenfilename(filetypes=CONFIG["query_csv"]["filetypes"])
         if not path: return
@@ -241,6 +150,19 @@ class MigrationToolApp(tk.Tk):
             self.query_table.insert("", "end", values=[r[c] for c in CONFIG["query_csv"]["columns"]])
         self._update_run_button()
 
+    def _copy_cell(self):
+        col_idx = int(self._clicked_col.replace('#','')) - 1
+        col_id = CONFIG["query_csv"]["columns"][col_idx]
+        val = self.query_table.set(self._clicked_row, col_id)
+        self.clipboard_clear(); self.clipboard_append(val)
+
+    def _show_context_menu(self, event):
+        region = self.query_table.identify_region(event.x, event.y)
+        if region == "cell":
+            self._clicked_row = self.query_table.identify_row(event.y)
+            self._clicked_col = self.query_table.identify_column(event.x)
+            self.menu.tk_popup(event.x_root, event.y_root)
+
     def _update_run_button(self):
         if self.source_mode.get() == "env" and self.query_df is not None:
             u = self.source_username.get().strip()
@@ -251,14 +173,57 @@ class MigrationToolApp(tk.Tk):
                 return
         self.run_button.config(state="disabled")
 
+    def _on_mode_change(self):
+        if self.source_mode.get() == "env":
+            self.env_frame.pack(fill="x", padx=10, pady=(5,0))
+            self.file_frame.pack_forget()
+        else:
+            self.env_frame.pack_forget()
+            self.file_frame.pack(fill="x", padx=10, pady=(5,0))
+        self._update_run_button_state()
+
+    def _update_run_button_state(self):
+        if self.source_mode.get() == "env":
+            creds_ok = all([
+                self.source_username.get().strip(),
+                self.source_password.get().strip(),
+                self.source_security_token.get().strip(),
+                self.query_df is not None
+            ])
+            state = "normal" if creds_ok else "disabled"
+        else:
+            txt = self.file_label.cget("text")
+            state = "normal" if txt.endswith((".csv", ".xls", ".xlsx")) else "disabled"
+        self.run_button.config(state=state)
+
+    def _select_file(self):
+        types = [("CSV file", "*.csv")] if self.file_type.get()=="CSV" else [("Excel file", "*.xlsx")]
+        path = filedialog.askopenfilename(filetypes=types)
+        display = path or "Nessun file selezionato"
+        self.file_label.config(text=display)
+
+        if path and self.source_mode.get()=="env":
+            cols = CONFIG["query_csv"]["columns"]
+            sep  = CONFIG["query_csv"].get("separator", ",")
+            self.query_df = pd.read_csv(path, sep=sep, usecols=cols)
+
+        if path:
+            cfg = load_config()
+            cfg["input_tables"] = path
+            save_config(cfg)
+
+        if self.source_mode.get()=="file" and path.lower().endswith((".xls", ".xlsx")):
+            self._show_excel_tabs(path)
+
+        self._update_run_button_state()
+
     def _start_run_queries(self):
-        # Disabilita il bottone, mostra la progress bar e avvia il thread
         self.run_button.config(state="disabled")
-        self.progress.pack(fill="x", padx=10, pady=(0,10))
+        self.progress.pack(fill="x", padx=10, pady=(5,0))
         self.progress.start(10)
 
-        worker = threading.Thread(target=self._run_queries_thread, daemon=True)
-        worker.start()
+        thread = threading.Thread(target=self._run_queries_thread, daemon=True)
+        thread.start()
 
     def _run_queries_thread(self):
         try:
@@ -269,21 +234,6 @@ class MigrationToolApp(tk.Tk):
         finally:
             # al termine, anche in caso di errore, ripristiniamo la UI
             self.after(0, self._on_queries_complete)
-
-    def _on_queries_complete(self):
-        self.progress.stop()
-        self.progress.pack_forget()
-        self._update_run_button_state()
-
-    def _update_run_button_state(self):
-        # Abilita il bottone solo se abbiamo credenziali valide e un CSV caricato
-        creds_ok = all([
-            getattr(self, f"source_{field}").get()
-            for field in ("username","password","security_token")
-        ])
-        csv_loaded = self.query_df is not None
-        state = "normal" if creds_ok and csv_loaded else "disabled"
-        self.run_button.config(state=state)
 
     def _run_queries_logic(self):
         # ---- autenticazione Salesforce ----
@@ -346,19 +296,64 @@ class MigrationToolApp(tk.Tk):
         self.after(0, finish_and_show)
 
     
+    def _on_queries_complete(self):
+        self.progress.stop()
+        self.progress.pack_forget()
+        self._update_run_button_state()
 
-    def _show_context_menu(self, event):
-        region = self.query_table.identify_region(event.x, event.y)
-        if region == "cell":
-            self._clicked_row = self.query_table.identify_row(event.y)
-            self._clicked_col = self.query_table.identify_column(event.x)
-            self.menu.tk_popup(event.x_root, event.y_root)
 
-    def _copy_cell(self):
-        col_idx = int(self._clicked_col.replace('#','')) - 1
-        col_id = CONFIG["query_csv"]["columns"][col_idx]
-        val = self.query_table.set(self._clicked_row, col_id)
-        self.clipboard_clear(); self.clipboard_append(val)
+    def _show_excel_tabs(self, path):
+        try:
+            sheets = read_spreadsheet(path)
+        except Exception as e:
+            messagebox.showerror("Errore lettura file", str(e))
+            return
+
+        win = tk.Toplevel(self)
+        win.title(f"Anteprima: {os.path.basename(path)}")
+        win.geometry("800x600")
+
+        notebook = ttk.Notebook(win)
+        notebook.pack(fill="both", expand=True)
+
+        for name, df in sheets.items():
+            frame = ttk.Frame(notebook)
+            notebook.add(frame, text=name[:31])
+
+            tree = ttk.Treeview(frame, columns=list(df.columns), show="headings")
+            vsb = ttk.Scrollbar(frame, orient="vertical",   command=tree.yview)
+            hsb = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
+            tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+            tree.grid(row=0, column=0, sticky="nsew")
+            vsb.grid(row=0, column=1, sticky="ns")
+            hsb.grid(row=1, column=0, sticky="ew")
+            frame.rowconfigure(0, weight=1)
+            frame.columnconfigure(0, weight=1)
+
+            for col in df.columns:
+                tree.heading(col, text=col)
+                tree.column(col, width=100, anchor="w")
+
+            for _, row in df.iterrows():
+                tree.insert("", "end", values=[row[c] for c in df.columns])
+
+    def _update_config_with_input_table_path(self, path):
+        try:
+            # Leggi la configurazione esistente
+            with open(CONFIG_FILE, "r") as f:
+                cfg = yaml.safe_load(f)
+            # Imposta o sovrascrive il parametro input_tables
+            cfg["input_tables"] = path
+            # Scrivi nuovamente il file YAML
+            with open(CONFIG_FILE, "w") as f:
+                yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=False)
+        except Exception as e:
+            messagebox.showwarning(
+                "Impossibile aggiornare config",
+                f"Errore durante il salvataggio di input_tables in {CONFIG_FILE}:\n{e}"
+                )
+
 
 if __name__ == "__main__":
     app = MigrationToolApp()
