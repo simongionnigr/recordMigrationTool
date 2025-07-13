@@ -1,3 +1,3 @@
 sobject api name;soql query
-Account; select Id, Name from Account where Name like '%merdaio%'
-Opportunity;select Id, Name from Opportunity where Name = 'pippo' 
+Account; select Id, Name from Account 
+Opportunity;select Id, Name from Opportunity 
