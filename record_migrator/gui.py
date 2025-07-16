@@ -23,6 +23,8 @@ class MigrationToolApp(tk.Tk):
 
         self.sf_client = None
         self.query_df = None
+        self.relationship_df = None   # terrà i mapping child→parent→field
+
 
         self._create_widgets()
 
@@ -55,6 +57,16 @@ class MigrationToolApp(tk.Tk):
         ttk.Button(self.file_frame, text="Seleziona file…", command=self._select_file).grid(row=0, column=2, padx=10)
         self.file_label = ttk.Label(self.file_frame, text="Nessun file selezionato")
         self.file_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(5,0))
+
+        # Relazioni tra SObject 
+        rel_frame = ttk.LabelFrame(main, text="Relazioni SObject", padding=10)
+        rel_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10,0))
+        ttk.Button(rel_frame, text="Carica relazioni…", command=self._load_relationships) \
+            .grid(row=0, column=0, sticky="w", padx=(0,5))
+        self.relationship_label = ttk.Label(rel_frame, text="Nessun file relazioni selezionato")
+        self.relationship_label.grid(row=0, column=1, sticky="w")
+        rel_frame.columnconfigure(1, weight=1)
+
 
         # Ambiente di destinazione
         self.target_frame = ttk.LabelFrame(main, text="Ambiente di destinazione", padding=10)
@@ -107,6 +119,60 @@ class MigrationToolApp(tk.Tk):
             ent.bind("<KeyRelease>", lambda e: self._update_run_button())
 
         self._toggle_source()
+
+    def _load_relationships(self):
+        """
+        Carica un CSV/XLSX a 3 colonne:
+        [child_sobject, parent_sobject, child_lookup_field]
+        """
+        types = [("CSV file","*.csv"),("Excel file","*.xlsx")]
+        path = filedialog.askopenfilename(filetypes=types)
+        if not path:
+            return
+
+        try:
+            if path.lower().endswith(".csv"):
+                sep = CONFIG["query_csv"].get("separator", ",")
+                df = pd.read_csv(path, sep=sep)
+            else:
+                df = pd.read_excel(path)
+            # Prendo solo prime 3 colonne e le rinomino
+            df = df.iloc[:, :3]
+            df.columns = ["child_sobject", "parent_sobject", "child_field"]
+            self.relationship_df = df
+            self.relationship_label.config(text=os.path.basename(path))
+        except Exception as e:
+            messagebox.showerror("Errore file relazioni", str(e))
+            self.relationship_df = None
+
+
+    def _apply_relationship_mappings(self, sheets: dict):
+        """
+        Per ogni mapping child→parent→field:
+        - sostituisce in sheets[child][field] i valori originali
+            con i corrispondenti record_id di sheets[parent].
+        """
+        for _, row in self.relationship_df.iterrows():
+            child = row["child_sobject"]
+            parent = row["parent_sobject"]
+            field = row["child_field"]
+
+            if child not in sheets or parent not in sheets:
+                continue
+            df_child  = sheets[child]
+            df_parent = sheets[parent]
+
+            # Serve la colonna "Id" nel parent per mappare → record_id
+            if field not in df_child.columns or "Id" not in df_parent.columns:
+                continue
+
+            # Costruisco dict: original parent Id → nuovo record_id
+            mapping = df_parent.set_index("Id")["record_id"].to_dict()
+            # Applico la sostituzione; se non trovo corrispondenza, lascio il valore originale
+            df_child[field] = df_child[field].map(mapping).fillna(df_child[field])
+
+            sheets[child] = df_child
+
 
     def _make_cred_fields(self, frame, prefix):
         ttk.Label(frame, text="Tipo ambiente").grid(row=0, column=0, sticky="w")
@@ -258,37 +324,34 @@ class MigrationToolApp(tk.Tk):
 
         # ---- esecuzione delle query ----
         col_sobj, col_soql = CONFIG["query_csv"]["columns"]
-        sheets_written = []
+        #sheets_written = []
 
-        with pd.ExcelWriter(save_path, engine="openpyxl") as writer:
-            for _, row in self.query_df.iterrows():
-                sobject = row[col_sobj]
-                soql    = row[col_soql]
-                try:
-                    resp    = self.sf.query_all(soql)
-                    records = resp.get("records", [])
-                    # escludo l’attributo “attributes”
-                    data    = [
-                        {k:v for k,v in r.items() if k!="attributes"}
-                        for r in records
-                    ]
-                    df_res = pd.DataFrame(data)
-                except Exception as err:
-                    # warning non blocca il ciclo
-                    self.after(0, lambda e=err, so=sobject:
-                               messagebox.showwarning("Query fallita",
-                                                      f"{so}: {e}"))
-                    continue
+        # 1) Esecuzione delle query e raccolta risultati in dict
+        col_sobj, col_soql = CONFIG["query_csv"]["columns"]
+        sheets = {}
+        for _, row in self.query_df.iterrows():
+            sobject = row[col_sobj]
+            soql    = row[col_soql]
+            try:
+                resp    = self.sf.query_all(soql)
+                records = resp.get("records", [])
+                data    = [{k:v for k,v in r.items() if k!="attributes"} for r in records]
+                df_res  = pd.DataFrame(data)
+                sheets[sobject[:31]] = df_res
+            except Exception as err:
+                self.after(0, lambda e=err, so=sobject:
+                           messagebox.showwarning("Query fallita",
+                                                  f"{so}: {e}"))
+                continue
 
-                sheet_name = sobject[:31]
-                df_res.to_excel(writer, sheet_name=sheet_name, index=False)
-                sheets_written.append(sheet_name)
+        # 2) Se non ho scritte tabelle, aggiungo un foglio di fallback
+        if not sheets:
+            sheets["Callback"] = pd.DataFrame(
+                ["Nessuna query eseguita correttamente"], columns=["message"]
+            )
 
-            # fallback se nessun foglio creato
-            if not sheets_written:
-                pd.DataFrame(
-                    ["Nessuna query eseguita correttamente"]
-                ).to_excel(writer, sheet_name="Callback", index=False, header=False)
+        # 3) Scrivo con write_spreadsheet, passando anche le relazioni
+        write_spreadsheet(save_path, sheets, self.relationship_df)
 
         # Informo al termine
         def finish_and_show():
@@ -315,6 +378,10 @@ class MigrationToolApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Errore lettura file", str(e))
             return
+        
+        # ─── Applica le relazioni Lookup se caricate ─────────────────
+        if self.relationship_df is not None:
+            self._apply_relationship_mappings(sheets)
 
         # Carica config attuale (per non sovrascrivere altre sezioni)
         cfg = load_import_config()

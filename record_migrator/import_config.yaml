@@ -1,8 +1,5 @@
 import_settings:
-  Account:
+  Contact:
     action: insert
     externalIdField: null
-  Opportunity:
-    action: insert
-    externalIdField: null
-input_tables: C:/RecordMigration/recordMigrationTool/test.xlsx
+input_tables: C:/RecordMigration/recordMigrationTool/test3.xlsx
