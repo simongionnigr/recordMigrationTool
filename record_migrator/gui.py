@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from simple_salesforce import Salesforce
 import yaml
+from collections import deque
 
 import pandas as pd
 
@@ -463,14 +464,12 @@ class MigrationToolApp(tk.Tk):
     def _confirm_import_settings(self, window):
         """
         Raccolta le scelte per ogni sheet e salva in import_config.yaml
-        sotto 'import_settings'.
+        sotto 'import_settings' e 'import_order'.
         """
-        from config import load_import_config, save_import_config, IMPORT_CONFIG_FILE
-
-        # Carico la configurazione di import esistente
+        # 1) Carico la configurazione di import esistente
         import_cfg = load_import_config()
 
-        # Sovrascrivo solo la sezione import_settings
+        # 2) Costruisco import_settings come prima
         settings = {}
         for sheet, vars in self.sheet_settings.items():
             action = vars["mode_var"].get()
@@ -481,12 +480,46 @@ class MigrationToolApp(tk.Tk):
             }
         import_cfg["import_settings"] = settings
 
-        # Salvo su import_config.yaml
+        # 3) Calcolo l'ordine di import (topological sort)
+        if self.relationship_df is not None and not self.relationship_df.empty:
+            # Nodi: tutti i parent e child unici
+            rels = self.relationship_df
+            nodes = set(rels["child_sobject"]) | set(rels["parent_sobject"])
+            # Grafo parent -> set(children)
+            graph = {nod: set() for nod in nodes}
+            in_degree = {nod: 0 for nod in nodes}
+
+            for _, row in rels.iterrows():
+                parent = row["parent_sobject"]
+                child  = row["child_sobject"]
+                # aggiungo arco parent->child
+                graph[parent].add(child)
+                in_degree[child] += 1
+
+            # coda dei nodi con in_degree 0
+            q = deque([n for n,d in in_degree.items() if d == 0])
+            order = []
+            while q:
+                n = q.popleft()
+                order.append(n)
+                for ch in graph[n]:
+                    in_degree[ch] -= 1
+                    if in_degree[ch] == 0:
+                        q.append(ch)
+
+            # se c'è un ciclo, includo comunque eventuali nodi mancanti
+            if len(order) < len(nodes):
+                missing = nodes - set(order)
+                order.extend(sorted(missing))
+
+            import_cfg["import_order"] = order
+
+        # 4) Salvo su import_config.yaml
         try:
             save_import_config(import_cfg)
             messagebox.showinfo(
                 "Salvato",
-                f"Le impostazioni di import sono salvate in:\n{IMPORT_CONFIG_FILE}"
+                f"Le impostazioni di import e l'ordine sono salvate in:\n{IMPORT_CONFIG_FILE}"
             )
             window.destroy()
         except Exception as e:
