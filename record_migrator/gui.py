@@ -7,12 +7,13 @@ import yaml
 
 import pandas as pd
 
-from config import load_config, save_config, CONFIG_FILE
+from config import load_config, load_import_config, save_config, save_import_config, IMPORT_CONFIG_FILE,  CONFIG_FILE
 from sf_client import SalesforceClient
 from excel_utils import read_spreadsheet, write_spreadsheet
 
 # Carica la configurazione YAML
 CONFIG = load_config()
+IMPORT_CONFIG = load_import_config()
 
 class MigrationToolApp(tk.Tk):
     def __init__(self):
@@ -208,9 +209,9 @@ class MigrationToolApp(tk.Tk):
             self.query_df = pd.read_csv(path, sep=sep, usecols=cols)
 
         if path:
-            cfg = load_config()
+            cfg = load_import_config()
             cfg["input_tables"] = path
-            save_config(cfg)
+            save_import_config(cfg)
 
         if self.source_mode.get()=="file" and path.lower().endswith((".xls", ".xlsx")):
             self._show_excel_tabs(path)
@@ -316,7 +317,7 @@ class MigrationToolApp(tk.Tk):
             return
 
         # Carica config attuale (per non sovrascrivere altre sezioni)
-        cfg = load_config()
+        cfg = load_import_config()
 
         # Resetto le impostazioni correnti
         self.sheet_settings = {}
@@ -423,16 +424,16 @@ class MigrationToolApp(tk.Tk):
             window.destroy()
         except Exception as e:
             messagebox.showerror("Errore salvataggio", str(e))
-            
+
     def _update_config_with_input_table_path(self, path):
         try:
             # Leggi la configurazione esistente
-            with open(CONFIG_FILE, "r") as f:
+            with open(IMPORT_CONFIG_FILE, "r") as f:
                 cfg = yaml.safe_load(f)
             # Imposta o sovrascrive il parametro input_tables
             cfg["input_tables"] = path
             # Scrivi nuovamente il file YAML
-            with open(CONFIG_FILE, "w") as f:
+            with open(IMPORT_CONFIG_FILE, "w") as f:
                 yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=False)
         except Exception as e:
             messagebox.showwarning(

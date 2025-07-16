@@ -7,5 +7,4 @@ query_csv:
   - - CSV file
     - '*.csv'
   separator: ;
-input_tables: C:/RecordMigration/recordMigrationTool/test.xlsx
 
