@@ -303,33 +303,79 @@ class MigrationToolApp(tk.Tk):
 
 
     def _show_excel_tabs(self, path):
+        """
+        Apre una finestra con un Notebook: ogni tab è un foglio Excel (o il CSV).
+        In ciascuna tab permette di scegliere 'insert' o 'upsert', e per upsert
+        di selezionare il campo External ID. Infine un pulsante per confermare
+        le impostazioni e salvarle in config.yaml.
+        """
         try:
             sheets = read_spreadsheet(path)
         except Exception as e:
             messagebox.showerror("Errore lettura file", str(e))
             return
 
+        # Carica config attuale (per non sovrascrivere altre sezioni)
+        cfg = load_config()
+
+        # Resetto le impostazioni correnti
+        self.sheet_settings = {}
+
         win = tk.Toplevel(self)
         win.title(f"Anteprima: {os.path.basename(path)}")
-        win.geometry("800x600")
+        win.geometry("900x600")
 
         notebook = ttk.Notebook(win)
-        notebook.pack(fill="both", expand=True)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
-        for name, df in sheets.items():
+        for sheet_name, df in sheets.items():
             frame = ttk.Frame(notebook)
-            notebook.add(frame, text=name[:31])
+            notebook.add(frame, text=sheet_name[:31])
 
-            tree = ttk.Treeview(frame, columns=list(df.columns), show="headings")
-            vsb = ttk.Scrollbar(frame, orient="vertical",   command=tree.yview)
-            hsb = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
+            # ─── Action Frame ─────────────────────────────────
+            action_frame = ttk.LabelFrame(frame, text="Import Settings", padding=5)
+            action_frame.pack(fill="x", pady=(0,10), padx=5)
+
+            # Modalità insert / upsert
+            mode_var = tk.StringVar(value="insert")
+            rb_insert = ttk.Radiobutton(action_frame, text="Insert", variable=mode_var, value="insert")
+            rb_upsert = ttk.Radiobutton(action_frame, text="Upsert", variable=mode_var, value="upsert")
+            rb_insert.pack(side="left", padx=5)
+            rb_upsert.pack(side="left", padx=5)
+
+            # Selezione External ID field (solo se upsert)
+            field_var = tk.StringVar()
+            lbl_field = ttk.Label(action_frame, text="External ID Field:")
+            cmb_field = ttk.Combobox(action_frame, values=list(df.columns),
+                                     textvariable=field_var, state="disabled", width=20)
+            lbl_field.pack(side="left", padx=(20,5))
+            cmb_field.pack(side="left", padx=5)
+
+            # Abilita/disabilita combo al cambio di mode_var
+            def _on_mode_change(*args, combo=cmb_field, var=mode_var):
+                combo.config(state="readonly" if var.get()=="upsert" else "disabled")
+                if var.get()=="insert":
+                    field_var.set("")  # reset se torni a insert
+            mode_var.trace_add("write", _on_mode_change)
+
+            # Salvo i var in un dict per dopo
+            self.sheet_settings[sheet_name] = {
+                "mode_var": mode_var,
+                "field_var": field_var
+            }
+
+            # ─── Treeview ───────────────────────────────────────
+            tree_frame = ttk.Frame(frame)
+            tree_frame.pack(fill="both", expand=True, padx=5, pady=(0,5))
+            tree = ttk.Treeview(tree_frame, columns=list(df.columns), show="headings")
+            vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=tree.yview)
+            hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=tree.xview)
             tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
             tree.grid(row=0, column=0, sticky="nsew")
             vsb.grid(row=0, column=1, sticky="ns")
             hsb.grid(row=1, column=0, sticky="ew")
-            frame.rowconfigure(0, weight=1)
-            frame.columnconfigure(0, weight=1)
+            tree_frame.rowconfigure(0, weight=1)
+            tree_frame.columnconfigure(0, weight=1)
 
             for col in df.columns:
                 tree.heading(col, text=col)
@@ -337,6 +383,39 @@ class MigrationToolApp(tk.Tk):
 
             for _, row in df.iterrows():
                 tree.insert("", "end", values=[row[c] for c in df.columns])
+
+        # ─── Pulsante Conferma ────────────────────────────────
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(fill="x", pady=(0,10))
+        confirm_btn = ttk.Button(
+            btn_frame, text="Conferma impostazioni", command=lambda: self._confirm_import_settings(win)
+        )
+        confirm_btn.pack(side="right", padx=10)
+
+    def _confirm_import_settings(self, window):
+        """
+        Raccolta le scelte per ogni sheet e salva in config.yaml sotto 'import_settings'.
+        """
+        # Carico config attuale e aggiorno
+        cfg = load_config()
+        import_cfg = {}
+        for sheet, vars in self.sheet_settings.items():
+            action = vars["mode_var"].get()
+            ext_id = vars["field_var"].get() if action=="upsert" else None
+            import_cfg[sheet] = {
+                "action": action,
+                "externalIdField": ext_id
+            }
+        cfg["import_settings"] = import_cfg
+        try:
+            save_config(cfg)
+            messagebox.showinfo(
+                "Salvato",
+                f"Le impostazioni di import sono salvate in:\n{CONFIG_FILE}"
+            )
+            window.destroy()
+        except Exception as e:
+            messagebox.showerror("Errore salvataggio", str(e)) 
 
     def _update_config_with_input_table_path(self, path):
         try:
