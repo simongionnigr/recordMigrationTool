@@ -394,29 +394,36 @@ class MigrationToolApp(tk.Tk):
 
     def _confirm_import_settings(self, window):
         """
-        Raccolta le scelte per ogni sheet e salva in config.yaml sotto 'import_settings'.
+        Raccolta le scelte per ogni sheet e salva in import_config.yaml
+        sotto 'import_settings'.
         """
-        # Carico config attuale e aggiorno
-        cfg = load_config()
-        import_cfg = {}
+        from config import load_import_config, save_import_config, IMPORT_CONFIG_FILE
+
+        # Carico la configurazione di import esistente
+        import_cfg = load_import_config()
+
+        # Sovrascrivo solo la sezione import_settings
+        settings = {}
         for sheet, vars in self.sheet_settings.items():
             action = vars["mode_var"].get()
-            ext_id = vars["field_var"].get() if action=="upsert" else None
-            import_cfg[sheet] = {
+            ext_id = vars["field_var"].get() if action == "upsert" else None
+            settings[sheet] = {
                 "action": action,
                 "externalIdField": ext_id
             }
-        cfg["import_settings"] = import_cfg
+        import_cfg["import_settings"] = settings
+
+        # Salvo su import_config.yaml
         try:
-            save_config(cfg)
+            save_import_config(import_cfg)
             messagebox.showinfo(
                 "Salvato",
-                f"Le impostazioni di import sono salvate in:\n{CONFIG_FILE}"
+                f"Le impostazioni di import sono salvate in:\n{IMPORT_CONFIG_FILE}"
             )
             window.destroy()
         except Exception as e:
-            messagebox.showerror("Errore salvataggio", str(e)) 
-
+            messagebox.showerror("Errore salvataggio", str(e))
+            
     def _update_config_with_input_table_path(self, path):
         try:
             # Leggi la configurazione esistente

@@ -1,0 +1,7 @@
+import_settings:
+  Account:
+    action: upsert
+    externalIdField: Name
+  Opportunity:
+    action: insert
+    externalIdField: null
