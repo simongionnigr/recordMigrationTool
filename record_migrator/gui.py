@@ -106,6 +106,18 @@ class MigrationToolApp(tk.Tk):
                                      command=self._start_run_queries, state="disabled")
         self.run_button.grid(row=2, column=0, sticky="ew", pady=(10,0))
 
+         # ——— Import button (grafica, senza logica per ora) ———
+        self.import_button = ttk.Button(
+            main,
+            text="Importa Dati",
+            command=self._start_run_import, 
+            state="disabled"           
+        )
+        self.import_button.grid(
+            row=4, column=0, columnspan=2,
+            sticky="ew", pady=(10,0)
+        )
+
         # Progress bar (inizialmente nascosta)
         self.progress = ttk.Progressbar(self, mode="indeterminate")
 
@@ -115,9 +127,12 @@ class MigrationToolApp(tk.Tk):
         self.query_table.bind("<Button-3>", self._show_context_menu)
 
         # Abilitazione run_button al cambiamento credenziali
-        for attr in ["source_username", "source_password", "source_security_token"]:
-            ent = getattr(self, attr)
-            ent.bind("<KeyRelease>", lambda e: self._update_run_button())
+        # ogni volta che digito in un campo credenziali, aggiorno lo stato dei bottoni
+        for prefix in ("source", "target"):
+            for field in ("username","password","security_token"):
+                ent = getattr(self, f"{prefix}_{field}")
+                ent.bind("<KeyRelease>", lambda e: self._update_buttons_state())
+
 
         self._toggle_source()
 
@@ -178,9 +193,15 @@ class MigrationToolApp(tk.Tk):
     def _make_cred_fields(self, frame, prefix):
         ttk.Label(frame, text="Tipo ambiente").grid(row=0, column=0, sticky="w")
         comb = ttk.Combobox(frame, values=["Sandbox", "Production"], state="readonly")
-        comb.current(0); comb.grid(row=0, column=1, sticky="ew")
+        comb.current(0)
+        comb.grid(row=0, column=1, sticky="ew")
+
+        # ← aggiungi qui l’assegnazione per entrambi i prefissi
         if prefix == "source":
             self.source_env_type = comb
+        elif prefix == "target":
+            self.target_env_type = comb
+
         labels = ["Username", "Password", "Security Token"]
         for i, label in enumerate(labels, start=1):
             ttk.Label(frame, text=label).grid(row=i, column=0, sticky="w")
@@ -188,8 +209,11 @@ class MigrationToolApp(tk.Tk):
             entry = ttk.Entry(frame, show=show) if show else ttk.Entry(frame)
             entry.grid(row=i, column=1, sticky="ew")
             setattr(self, f"{prefix}_{label.lower().replace(' ','_')}", entry)
-        for i in range(4): frame.rowconfigure(i, pad=5)
+
+        for i in range(4):
+            frame.rowconfigure(i, pad=5)
         frame.columnconfigure(1, weight=1)
+
 
     def _toggle_source(self):
         if self.source_mode.get() == "env":
@@ -216,7 +240,8 @@ class MigrationToolApp(tk.Tk):
             self.query_table.delete(row)
         for _, r in df.iterrows():
             self.query_table.insert("", "end", values=[r[c] for c in CONFIG["query_csv"]["columns"]])
-        self._update_run_button()
+        self._update_buttons_state()
+
 
     def _copy_cell(self):
         col_idx = int(self._clicked_col.replace('#','')) - 1
@@ -231,15 +256,32 @@ class MigrationToolApp(tk.Tk):
             self._clicked_col = self.query_table.identify_column(event.x)
             self.menu.tk_popup(event.x_root, event.y_root)
 
-    def _update_run_button(self):
-        if self.source_mode.get() == "env" and self.query_df is not None:
-            u = self.source_username.get().strip()
-            p = self.source_password.get().strip()
-            t = self.source_security_token.get().strip()
-            if u and p and t:
-                self.run_button.config(state="normal")
-                return
-        self.run_button.config(state="disabled")
+    def _update_buttons_state(self):
+        # ── Abilita “Esegui Query e Esporta Excel” ───────────
+        run_ok = False
+        if self.source_mode.get() == "env":
+            run_ok = (
+                self.query_df is not None
+                and self.source_username.get().strip()
+                and self.source_password.get().strip()
+                and self.source_security_token.get().strip()
+            )
+        else:
+            run_ok = self.file_label.cget("text").endswith((".csv", ".xls", ".xlsx"))
+
+        self.run_button.config(state="normal" if run_ok else "disabled")
+
+        # ── Abilita “Importa Dati” ────────────────────────────
+        # 1) dati pronti (export o file)
+        data_ready = run_ok
+        # 2) credenziali destinazione
+        tgt_ok = (
+            getattr(self, "target_username").get().strip() and
+            getattr(self, "target_password").get().strip() and
+            getattr(self, "target_security_token").get().strip()
+        )
+        self.import_button.config(state="normal" if data_ready and tgt_ok else "disabled")
+
 
     def _on_mode_change(self):
         if self.source_mode.get() == "env":
@@ -283,7 +325,8 @@ class MigrationToolApp(tk.Tk):
         if self.source_mode.get()=="file" and path.lower().endswith((".xls", ".xlsx")):
             self._show_excel_tabs(path)
 
-        self._update_run_button_state()
+        self._update_buttons_state()
+
 
     def _start_run_queries(self):
         self.run_button.config(state="disabled")
@@ -366,6 +409,163 @@ class MigrationToolApp(tk.Tk):
         self.progress.pack_forget()
         self._update_run_button_state()
 
+
+    def _start_run_import(self):
+        """
+        Disable import button, show progress bar e lancia il thread di import.
+        """
+        self.import_button.config(state="disabled")
+        self.progress.pack(fill="x", padx=10, pady=(5,0))
+        self.progress.start(10)
+
+        thread = threading.Thread(target=self._run_import_logic, daemon=True)
+        thread.start()
+
+    def _run_import_logic(self):
+        """
+        1) Autentica su Salesforce destinazione
+        2) Legge import_config.yaml (input_tables, import_order, import_settings)
+        3) Legge i fogli da input_tables, inietta record_id se serve
+        4) Esegue insert/upsert per ogni oggetto nell'ordine corretto
+        5) Scrive su ciascun foglio gli sf_id e gli errori
+        6) Applica mapping relazioni ai figli
+        7) Salva il file di output e mostra anteprima
+        """
+        try:
+            # --- 1) Autenticazione destinazione ---
+            dest_cfg = load_import_config()
+            # recupero credenziali dai widget
+            dest_type = self.target_env_type.get().lower()
+            domain    = "test" if dest_type=="sandbox" else "login"
+            sf_dest = Salesforce(
+                username=self.target_username.get().strip(),
+                password=self.target_password.get().strip(),
+                security_token=self.target_security_token.get().strip(),
+                domain=domain
+            )
+
+            # --- 2) Lettura config di import ---
+            cfg = load_import_config()
+            path = cfg.get("input_tables")
+            if not path:
+                raise RuntimeError("Parametro 'input_tables' non trovato in import_config.yaml")
+
+            import_order    = cfg.get("import_order", [])
+            import_settings = cfg.get("import_settings", {})
+            ignore_cols     = cfg.get("ignore_columns", ["record_id","to_import","sf_id","error"])
+
+            # --- 3) Carica i fogli con record_id già iniettato ---
+            sheets = read_spreadsheet(path)
+
+            # se non c'è import_order, uso l'ordine dei fogli
+            if not import_order:
+                import_order = list(sheets.keys())
+
+            # preparazione mappe
+            sf_id_map    = {}   # {sobject: {internal_id: sf_id}}
+            failure_map  = {}   # {sobject: set(internal_id)}
+
+            # --- 4) Ciclo di import per ciascun oggetto ---
+            for sobject in import_order:
+                if sobject not in sheets:
+                    continue
+
+                df = sheets[sobject]
+                internal_ids = df["record_id"].tolist()
+                # --- Droppo le colonne da ignorare ---
+                data_df = df.drop(columns=ignore_cols, errors="ignore")
+
+                # scelta modalità
+                setting = import_settings.get(sobject, {})
+                action      = setting.get("action", "insert")
+                ext_id_fld  = setting.get("externalIdField")
+
+                results = []
+                for idx, record in enumerate(data_df.to_dict(orient="records")):
+                    try:
+                        if action=="upsert" and ext_id_fld:
+                            res = sf_dest.__getattr__(sobject).upsert(
+                                f"{ext_id_fld}/{record[ext_id_fld]}", record
+                            )
+                            sf_id = res.get("id") or res.get("Id")
+                        else:
+                            res = sf_dest.__getattr__(sobject).create(record)
+                            sf_id = res.get("id") or res.get("Id")
+                        results.append((internal_ids[idx], sf_id, None))
+                    except Exception as e:
+                        results.append((internal_ids[idx], None, str(e)))
+
+                # 5) Annotazione sf_id ed errori sul DataFrame
+                df["sf_id"] = [r[1] for r in results]
+                df["error"] = [r[2] for r in results]
+
+                # aggiorno mappe per le relazioni future
+                sf_id_map[sobject]   = {r[0]: r[1] for r in results if r[1]}
+                failure_map[sobject] = {r[0] for r in results if not r[1]}
+
+                sheets[sobject] = df
+
+                # 6) Applica mapping relazioni ai figli
+                if self.relationship_df is not None:
+                    for _, rel in self.relationship_df.iterrows():
+                        parent = rel["parent_sobject"]
+                        child  = rel["child_sobject"]
+                        field  = rel["child_field"]
+                        if parent != sobject or child not in sheets:
+                            continue
+                        child_df = sheets[child]
+                        # colonna di flag per non importare
+                        if "to_import" not in child_df.columns:
+                            child_df["to_import"] = True
+                        if "error" not in child_df.columns:
+                            child_df["error"] = None
+
+                        # sostituisco id e flaggo fallimenti
+                        new_vals, to_imp, errs = [], [], []
+                        for rid in child_df[field]:
+                            if rid in sf_id_map[parent]:
+                                new_vals.append(sf_id_map[parent][rid])
+                                to_imp.append(True)
+                                errs.append(None)
+                            else:
+                                new_vals.append(rid)
+                                to_imp.append(False)
+                                errs.append(
+                                    f"Parent {parent} load failed"
+                                    if rid in failure_map[parent]
+                                    else None
+                                )
+                        child_df[field]     = new_vals
+                        child_df["to_import"]= to_imp
+                        # unisco eventuali errori preesistenti
+                        child_df["error"]   = child_df["error"].fillna(pd.Series(errs, index=child_df.index))
+
+                        sheets[child] = child_df
+
+            # --- 7) Salvataggio del nuovo Excel ---
+            save_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel file","*.xlsx")]
+            )
+            if save_path:
+                write_spreadsheet(save_path, sheets, self.relationship_df)
+
+            # notifica + anteprima
+            self.after(0, lambda:
+                messagebox.showinfo("Import completato", f"File di log salvato in:\n{save_path}")
+            )
+            self.after(0, lambda: self._show_excel_tabs(save_path))
+
+        except Exception as exc:
+            # catturo exc come default arg in modo che la lambda lo conservi
+            self.after(0, lambda exc=exc:
+                messagebox.showerror("Errore Import", str(exc))
+            )
+        finally:
+            self.after(0, self.progress.stop)
+            self.after(0, self.progress.pack_forget)
+            # riabilita il pulsante per eventuali retry
+            self.after(0, lambda: self.import_button.config(state="normal"))
 
     def _show_excel_tabs(self, path):
         """

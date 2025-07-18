@@ -55,17 +55,18 @@ def read_spreadsheet(path: str) -> dict:
 def write_spreadsheet(path: str, sheets: dict, relationship_df: pd.DataFrame = None):
     """
     Scrive tutti i DataFrame in 'sheets' in un file Excel:
-      - inietta prima una colonna 'record_id' univoca per riga
+      - inserisce 'record_id' solo se non esiste già
       - se relationship_df non è None, applica i mapping su sheets
       - salva con openpyxl
       - se sheets è vuoto, crea un foglio di fallback
     """
-    # 1) Inietta record_id
+    # 1) Inietta record_id solo se manca
     processed = {}
     for name, df in sheets.items():
         df_copy = df.copy()
-        ids = [str(uuid.uuid4()) for _ in range(len(df_copy))]
-        df_copy.insert(0, "record_id", ids)
+        if "record_id" not in df_copy.columns:
+            ids = [str(uuid.uuid4()) for _ in range(len(df_copy))]
+            df_copy.insert(0, "record_id", ids)
         processed[name] = df_copy
 
     # 2) Applica mapping relazioni se fornito
@@ -77,6 +78,8 @@ def write_spreadsheet(path: str, sheets: dict, relationship_df: pd.DataFrame = N
         for name, df_c in processed.items():
             df_c.to_excel(writer, sheet_name=name[:31], index=False)
         if not processed:
+            # fallback
             fallback = pd.DataFrame(["Nessuna query eseguita correttamente"], columns=["message"])
-            fallback.insert(0, "record_id", [str(uuid.uuid4())])
-            fallback.to_excel(writer, sheet_name="Callback", index=False, header=False)
+            if "record_id" not in fallback.columns:
+                fallback.insert(0, "record_id", [str(uuid.uuid4())])
+            fallback.to_excel(writer, sheet_name="Callback", index=False)
