@@ -1,5 +1,8 @@
-from gui import MigrationToolApp
+from record_migrator.gui import MigrationToolApp
 
-if __name__ == "__main__":
+def main():
     app = MigrationToolApp()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()

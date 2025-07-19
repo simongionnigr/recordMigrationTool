@@ -9,9 +9,9 @@ from collections import deque
 
 import pandas as pd
 
-from config import load_config, load_import_config, save_config, save_import_config, IMPORT_CONFIG_FILE,  CONFIG_FILE
-from sf_client import SalesforceClient
-from excel_utils import read_spreadsheet, write_spreadsheet
+from record_migrator.config import load_config, load_import_config, save_config, save_import_config, IMPORT_CONFIG_FILE,  CONFIG_FILE
+from record_migrator.sf_client import SalesforceClient
+from record_migrator.excel_utils import read_spreadsheet, write_spreadsheet
 
 # Carica la configurazione YAML
 CONFIG = load_config()

@@ -12,3 +12,14 @@ __pycache__/
 *.xlsx
 *.xls
 *.csv
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Eventuali exe / dll / log generati
+__pycache__/
+*.exe
+*.dll
+*.log
