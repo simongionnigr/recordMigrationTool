@@ -1,137 +1,88 @@
 # Salesforce Data Migrator
 
-**Salesforce Data Migrator** è un'applicazione desktop con interfaccia grafica (GUI) per esportare ed importare dati tra organizzazioni Salesforce (sandbox o production).
+**Salesforce Data Migrator** è uno strumento desktop con interfaccia grafica (GUI) per migrare dati tra org Salesforce. Supporta sia l'esportazione batch tramite query SOQL su più oggetti, sia l'import di record da Excel o CSV verso un ambiente di destinazione, con gestione delle relazioni tra oggetti.
 
 ## 🧰 Funzionalità principali
 
-- **Esportazione dati**
-
-  - Autenticazione su sandbox o production tramite username, password e security token
-  - Esecuzione batch di query SOQL definite in un file CSV
-  - Generazione automatica delle relazioni (lookup o master detail) tra SObject selezionati
-  - Esportazione dei risultati in file Excel con fogli separati e `record_id` unico per ogni record
-
-- **Importazione dati**
-
-  - Configurazione di modalità `insert` o `upsert` per ciascun SObject
-  - Selezione di un campo External ID per le operazioni di upsert
-  - Applicazione automatica delle relazioni parent–child per gestire i riferimenti tra record
-  - Salvataggio del log con `sf_id` generati e eventuali errori in un file Excel di output
-  - Calcolo automatico dell'ordine di import sulla base delle dipendenze tra oggetti
-
-## 🖥️ Requisiti
-
-- Python ≥ 3.8
-- Librerie Python:
-  ```
-  pandas
-  openpyxl
-  pyyaml
-  simple-salesforce
-  ttkthemes
-  ```
-- `tkinter` (incluso nella maggior parte delle distribuzioni Python)
+- Autenticazione in ambienti Sandbox o Production tramite API di Salesforce
+- Esecuzione di query SOQL da file CSV e esportazione risultati in Excel
+- Importazione massiva di dati da Excel in un ambiente Salesforce
+- Gestione automatica delle lookup relationship tra oggetti (opzionale)
+- Interfaccia utente temabile basata su `ttkthemes`
+- Configurazione persistente tramite file YAML
 
 ## 📦 Installazione
 
-1. Clona il repository:
-
-   ```bash
-   git clone https://github.com/tuo-utente/salesforce-data-migrator.git
-   cd salesforce-data-migrator
-   ```
-
-2. Crea un ambiente virtuale (opzionale ma consigliato):
-
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # Windows: venv\Scripts\activate
-   ```
-
-3. Installa le dipendenze:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## 🚀 Avvio
-
-Per avviare l'applicazione:
+Puoi installare lo strumento come pacchetto CLI Python:
 
 ```bash
-python main.py
+pip install --upgrade .
 ```
 
-## ⚙️ Configurazione
+oppure:
 
-### config.yaml
-
-Salvato automaticamente al primo avvio, contiene impostazioni per la GUI e per il caricamento delle query:
-
-```yaml
-query_csv:
-  columns: ["sobject_api", "soql"]
-  prompt: "Carica file query CSV"
-  filetypes: [["CSV file", "*.csv"]]
-  separator: ";"
-ui:
-  theme: "clam"
+```bash
+pip install .
 ```
 
-### import_config.yaml
+Per modalità di sviluppo (modifiche live):
 
-Memorizza percorso del file di input, ordine e impostazioni di import:
-
-```yaml
-input_tables: "/percorso/a/file.xlsx"
-import_order:
-  - Account
-  - Contact
-import_settings:
-  Account:
-    action: "upsert"
-    externalIdField: "External_Id__c"
-  Contact:
-    action: "insert"
-ignore_columns: ["record_id", "to_import", "sf_id", "error"]
+```bash
+pip install -e .
 ```
+
+## 🚀 Utilizzo
+
+Dopo l'installazione, puoi avviare il programma con il comando:
+
+```bash
+salesforce-data-migrator
+```
+
+oppure, se preferisci, puoi usare direttamente lo script principale:
+
+```bash
+python -m record_migrator.main
+```
+
+## 🖥️ Versione Standalone
+
+Per chi non vuole installare Python, è disponibile nella sezione **Releases** uno ZIP contenente l'eseguibile già compilato (`.exe`) pronto all'uso su Windows. Basta scaricarlo, estrarlo e lanciare l'eseguibile.
 
 ## 📁 Struttura del progetto
 
 ```
-.
-├── config.py           # Gestione caricamento e salvataggio config YAML
-├── config.yaml         # Config GUI e query (generato automaticamente)
-├── import_config.yaml  # Config import (generato automaticamente)
-├── excel_utils.py      # Lettura/scrittura di file Excel e CSV, generazione record_id
-├── gui.py              # Interfaccia grafica principale con Tkinter e ttkthemes
-├── sf_client.py        # Wrapper per autenticazione e query SOQL con simple_salesforce
-├── main.py             # Entry point dell’applicazione
-├── requirements.txt    # Elenco dipendenze Python
+record_migrator/
+├── __init__.py
+├── main.py
+├── gui.py
+├── config.py
+├── excel_utils.py
+├── sf_client.py
+├── config.yaml
+├── import_config.yaml
+setup.py
+requirements.txt
 ```
 
-## 📝 Formati file
+## 🗃️ Formato file query
 
-### File query CSV
+Il file CSV delle query deve contenere almeno le seguenti colonne:
 
-Deve contenere le seguenti due colonne:
+| sobject_api | soql                         |
+|-------------|------------------------------|
+| Account     | SELECT Id, Name FROM Account |
+| Contact     | SELECT Id, Email FROM Contact|
 
-| sobject_api | soql                          |
-| ------------ | ----------------------------- |
-| Account      | SELECT Id, Name FROM Account  |
-| Contact      | SELECT Id, Email FROM Contact |
+## 🔄 Formato file relazioni (opzionale)
 
-### File relazioni CSV (opzionale)
-
-Tre colonne: `child_sobject`, `parent_sobject`, `child_field`, ad esempio:
+Un file CSV o XLSX con le relazioni tra oggetti può essere fornito o generato automaticamente. Deve avere le seguenti colonne:
 
 | child_sobject | parent_sobject | child_field |
-| -------------- | --------------- | ------------ |
-| Contact        | Account         | AccountId    |
+|---------------|----------------|-------------|
 
-## 📌 Note
+## 🛟 Note
 
-- Viene generato un `record_id` UUID per ogni riga se non presente.
-- I nomi dei fogli Excel sono limitati a 31 caratteri per compatibilità.
-- In caso di errore in una query o in un import, l’app mostra un warning ma prosegue con le altre operazioni.
-
+- I file `config.yaml` e `import_config.yaml` vengono creati e aggiornati automaticamente.
+- In caso di errori durante query o import, il programma continua e li segnala nella GUI.
+- I fogli Excel hanno nome troncato a 31 caratteri per compatibilità con Excel.
