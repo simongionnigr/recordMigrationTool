@@ -2,6 +2,7 @@ import os
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from ttkthemes import ThemedStyle
 from simple_salesforce import Salesforce
 import yaml
 from collections import deque
@@ -21,13 +22,48 @@ class MigrationToolApp(tk.Tk):
         super().__init__()
         self.title("Salesforce Data Migrator")
         self.geometry("900x600")
+         # inizializza lo style (ttkthemes) e la var del tema
+        self.style = ThemedStyle(self)
+        self.theme_var = tk.StringVar()
 
-        self.sf_client = None
-        self.query_df = None
-        self.relationship_df = None   # terrà i mapping child→parent→field
-
-
+        # prima metto la toolbar con il selettore tema
+        self._create_toolbar()
+        # infine tutti gli altri widget
         self._create_widgets()
+
+    def _apply_theme(self, evt=None):
+        theme = self.theme_var.get()
+        self.style.theme_use(theme)
+        # salva su config.yaml
+        cfg = load_config()
+        cfg.setdefault("ui", {})["theme"] = theme
+        save_config(cfg)
+
+    def _create_toolbar(self):
+        """
+        Crea la menu-bar in alto con voci File, Edit, View… come in VSCode.
+        """
+        menubar = tk.Menu(self)
+
+        # (opzionale) sotto View aggiungi il submenu Tema
+        theme_menu = tk.Menu(menubar, tearoff=False)
+        menubar.add_cascade(label="Scegli Un Tema", menu=theme_menu)
+        for th in self.style.theme_names():
+            theme_menu.add_radiobutton(
+                label=th,
+                variable=self.theme_var,
+                value=th,
+                command=self._apply_theme
+            )
+
+        # infine setti la menu bar sulla finestra
+        self.config(menu=menubar)
+
+        # imposta il tema di default preso da config
+        default = CONFIG["ui"].get("theme", self.style.theme_names()[0])
+        if default in self.style.theme_names():
+            self.theme_var.set(default)
+            self.style.theme_use(default)
 
     def _create_widgets(self):
         main = ttk.Frame(self, padding=10)
@@ -62,11 +98,35 @@ class MigrationToolApp(tk.Tk):
         # Relazioni tra SObject 
         rel_frame = ttk.LabelFrame(main, text="Relazioni SObject", padding=10)
         rel_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10,0))
-        ttk.Button(rel_frame, text="Carica relazioni…", command=self._load_relationships) \
-            .grid(row=0, column=0, sticky="w", padx=(0,5))
-        self.relationship_label = ttk.Label(rel_frame, text="Nessun file relazioni selezionato")
-        self.relationship_label.grid(row=0, column=1, sticky="w")
-        rel_frame.columnconfigure(1, weight=1)
+
+        # Radio per scegliere modalità
+        self.rel_mode = tk.StringVar(value="auto")
+        self.auto_rel_radio = ttk.Radiobutton(
+            rel_frame, text="Genera da Org", variable=self.rel_mode, value="auto",
+            command=self._toggle_rel_mode
+        )
+        self.file_rel_radio = ttk.Radiobutton(
+            rel_frame, text="Carica CSV", variable=self.rel_mode, value="file",
+            command=self._toggle_rel_mode
+        )
+        
+
+        self.auto_rel_radio.grid(row=0, column=0, padx=5)
+        self.file_rel_radio.grid(row=0, column=1, padx=5)
+
+        # Pulsante dinamico (carica o genera)
+        self.rel_button = ttk.Button(rel_frame, text="Seleziona file…",
+                                    command=self._handle_relations_source)
+        self.rel_button.grid(row=0, column=2, padx=10)
+
+        # Label con il nome/percorso del file relazioni
+        self.relationship_label = ttk.Label(
+            rel_frame, text="Nessun file relazioni selezionato"
+        )
+        self.relationship_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(5,0))
+
+        rel_frame.columnconfigure(2, weight=1)
+
 
 
         # Ambiente di destinazione
@@ -83,6 +143,8 @@ class MigrationToolApp(tk.Tk):
         # Bottone per caricamento query CSV
         ttk.Button(self.query_frame, text=CONFIG["query_csv"]["prompt"],
                    command=self._load_query_csv).grid(row=0, column=0, sticky="w")
+        
+
 
         # Tabella scrollabile
         tf = ttk.Frame(self.query_frame)
@@ -101,22 +163,9 @@ class MigrationToolApp(tk.Tk):
             self.query_table.heading(col, text=col)
             self.query_table.column(col, width=200, anchor="w")
 
-        # Bottone esecuzione
-        self.run_button = ttk.Button(self.query_frame, text="Esegui Query e Esporta Excel", 
-                                     command=self._start_run_queries, state="disabled")
-        self.run_button.grid(row=2, column=0, sticky="ew", pady=(10,0))
+        # ─── Button bar ───────────────────────────────────────────
+        self._position_execution_buttons(main)
 
-         # ——— Import button (grafica, senza logica per ora) ———
-        self.import_button = ttk.Button(
-            main,
-            text="Importa Dati",
-            command=self._start_run_import, 
-            state="disabled"           
-        )
-        self.import_button.grid(
-            row=4, column=0, columnspan=2,
-            sticky="ew", pady=(10,0)
-        )
 
         # Progress bar (inizialmente nascosta)
         self.progress = ttk.Progressbar(self, mode="indeterminate")
@@ -135,6 +184,57 @@ class MigrationToolApp(tk.Tk):
 
 
         self._toggle_source()
+        self._toggle_rel_mode()
+
+    def _position_execution_buttons(self, main):
+        btn_frame = ttk.Frame(main)
+        btn_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10,0))
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+
+        # Esegui Query e Esporta Excel (metà sinistra)
+        self.run_button = ttk.Button(
+            btn_frame,
+            text="Esegui Query e Esporta Excel",
+            command=self._start_run_queries,
+            state="disabled"
+        )
+        self.run_button.grid(row=0, column=0, sticky="ew", padx=(0,5))
+
+        # Importa Dati (metà destra)
+        self.import_button = ttk.Button(
+            btn_frame,
+            text="Importa Dati",
+            command=self._start_run_import,
+            state="disabled"
+        )
+        self.import_button.grid(row=0, column=1, sticky="ew", padx=(5,0))
+
+
+    def _toggle_rel_mode(self):
+        """
+        Cambia il testo del pulsante rel_button a seconda
+        della modalità selezionata (file vs auto).
+        """
+        if self.rel_mode.get() == "file":
+            self.rel_button.config(text="Seleziona file…")
+        else:
+            self.rel_button.config(text="Genera relazioni…")
+
+    def _handle_relations_source(self):
+        """
+        Callback del pulsante rel_button:
+        - se modalità 'file' chiama la routine di caricamento
+        - se modalità 'auto' per ora solo aggiorna la label (implementeremo la logica dopo)
+        """
+        if self.rel_mode.get() == "file":
+            self._load_relationships()
+        else:
+            # per ora solo UI: indichiamo che è stata scelta la generazione
+            self.relationship_df = None
+            self.relationship_label.config(text="Generazione automatica selezionata")
+            # in futuro qui chiameremo generate_relationships(...)
+
 
     def _load_relationships(self):
         """
@@ -157,9 +257,85 @@ class MigrationToolApp(tk.Tk):
             df.columns = ["child_sobject", "parent_sobject", "child_field"]
             self.relationship_df = df
             self.relationship_label.config(text=os.path.basename(path))
+
         except Exception as e:
             messagebox.showerror("Errore file relazioni", str(e))
             self.relationship_df = None
+
+    def _toggle_rel_mode(self):
+        """Aggiorna testo del pulsante rel_button."""
+        if self.rel_mode.get() == "file":
+            self.rel_button.config(text="Seleziona file…")
+        else:
+            self.rel_button.config(text="Genera relazioni…")
+
+    def _handle_relations_source(self):
+        """
+        Chiamato dal pulsante rel_button: se file → _load_relationships(),
+        se auto → _generate_relationships().
+        """
+        if self.rel_mode.get() == "file":
+            self._load_relationships()
+        else:
+            self._generate_relationships()
+
+    def _generate_relationships(self):
+        """
+        Genera un CSV relazioni basato sugli API name di self.query_df,
+        salva il file e il suo path in import_config.yaml.
+        """
+
+        # 1) Mi assicuro di avere la connessione Salesforce
+        try:
+            self._ensure_source_connection()
+        except Exception as e:
+            messagebox.showerror("Genera relazioni", str(e))
+            return
+        if self.query_df is None:
+            messagebox.showwarning("Genera relazioni", "Prima carica il CSV delle query.")
+            return
+
+        api_col = CONFIG["query_csv"]["columns"][0]
+        objects = self.query_df[api_col].dropna().unique().tolist()
+
+        rows = []
+        for obj in objects:
+            try:
+                meta = self.sf.__getattr__(obj).describe()
+                for f in meta["fields"]:
+                    if f["type"] == "reference":
+                        for parent in f.get("referenceTo", []):
+                            if parent in objects:
+                                rows.append({
+                                    "child_sobject": obj,
+                                    "parent_sobject": parent,
+                                    "child_field": f["name"]
+                                })
+            except Exception as e:
+                messagebox.showwarning("Describe fallito",
+                                    f"{obj}: {e}")
+
+        df = pd.DataFrame(rows, columns=["child_sobject","parent_sobject","child_field"])
+        if df.empty:
+            messagebox.showinfo("Nessuna relazione",
+                                "Non sono state trovate relazioni tra gli oggetti selezionati.")
+            return
+
+        # chiedi dove salvare il CSV
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV file","*.csv")]
+        )
+        if not path:
+            return
+
+        sep = CONFIG["query_csv"].get("separator", ",")
+        df.to_csv(path, index=False, sep=sep)
+
+        # aggiorno UI e config
+        self.relationship_df = df
+        self.relationship_label.config(text=path)
+
 
 
     def _apply_relationship_mappings(self, sheets: dict):
@@ -220,10 +396,17 @@ class MigrationToolApp(tk.Tk):
             self.env_frame.grid()
             self.query_frame.grid()
             self.file_frame.grid_remove()
+            # Generazione relazioni solo se env
+            self.auto_rel_radio.config(state="normal")
         else:
             self.file_frame.grid(row=1, column=0, sticky="nsew", padx=(0,5))
             self.env_frame.grid_remove()
             self.query_frame.grid_remove()
+            # disabilita la generazione relazioni in file-mode
+            self.auto_rel_radio.config(state="disabled")
+            # forziamo rel_mode a 'file'
+            self.rel_mode.set("file")
+            self._toggle_rel_mode()
 
     def _load_query_csv(self):
         path = filedialog.askopenfilename(filetypes=CONFIG["query_csv"]["filetypes"])
@@ -348,14 +531,12 @@ class MigrationToolApp(tk.Tk):
 
     def _run_queries_logic(self):
         # ---- autenticazione Salesforce ----
-        src_type = self.source_env_type.get().lower()  # "sandbox" o "production"
-        domain   = "test" if src_type=="sandbox" else "login"
-        self.sf = Salesforce(
-            username=self.source_username.get(),
-            password=self.source_password.get(),
-            security_token=self.source_security_token.get(),
-            domain=domain
-        )
+        try:
+            self._ensure_source_connection()
+        except Exception as e:
+            self.after(0, lambda: messagebox.showerror("Autenticazione fallita", str(e)))
+            return
+
 
         # ---- scelta del file di output ----
         save_path = filedialog.asksaveasfilename(
@@ -435,14 +616,11 @@ class MigrationToolApp(tk.Tk):
             # --- 1) Autenticazione destinazione ---
             dest_cfg = load_import_config()
             # recupero credenziali dai widget
-            dest_type = self.target_env_type.get().lower()
-            domain    = "test" if dest_type=="sandbox" else "login"
-            sf_dest = Salesforce(
-                username=self.target_username.get().strip(),
-                password=self.target_password.get().strip(),
-                security_token=self.target_security_token.get().strip(),
-                domain=domain
-            )
+            try:
+                self._ensure_target_connection()
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("Auth Destinazione", str(e)))
+                return
 
             # --- 2) Lettura config di import ---
             cfg = load_import_config()
@@ -484,12 +662,12 @@ class MigrationToolApp(tk.Tk):
                 for idx, record in enumerate(data_df.to_dict(orient="records")):
                     try:
                         if action=="upsert" and ext_id_fld:
-                            res = sf_dest.__getattr__(sobject).upsert(
+                            res = self.sf_dest.__getattr__(sobject).upsert(
                                 f"{ext_id_fld}/{record[ext_id_fld]}", record
                             )
                             sf_id = res.get("id") or res.get("Id")
                         else:
-                            res = sf_dest.__getattr__(sobject).create(record)
+                            res = self.sf_dest.__getattr__(sobject).create(record)
                             sf_id = res.get("id") or res.get("Id")
                         results.append((internal_ids[idx], sf_id, None))
                     except Exception as e:
@@ -740,6 +918,36 @@ class MigrationToolApp(tk.Tk):
                 "Impossibile aggiornare config",
                 f"Errore durante il salvataggio di input_tables in {CONFIG_FILE}:\n{e}"
                 )
+    def _ensure_source_connection(self):
+        """
+        Se non esiste già self.sf, leggiamo le credenziali sorgente 
+        dai campi GUI e creiamo la connessione Salesforce.
+        """
+        if hasattr(self, "sf"):
+            return
+
+        # Controllo rapido che i campi siano valorizzati
+        u = self.source_username.get().strip()
+        p = self.source_password.get().strip()
+        t = self.source_security_token.get().strip()
+        if not (u and p and t):
+            raise RuntimeError("Per generare le relazioni devi prima inserire le credenziali di origine.")
+
+        dom = "test" if self.source_env_type.get().lower()=="sandbox" else "login"
+        self.sf = Salesforce(username=u, password=p, security_token=t, domain=dom)
+    def _ensure_target_connection(self):
+        if hasattr(self, "sf_dest"):
+            return
+
+        u = self.target_username.get().strip()
+        p = self.target_password.get().strip()
+        t = self.target_security_token.get().strip()
+        if not (u and p and t):
+            raise RuntimeError("Inserisci credenziali di destinazione per l’import.")
+
+        domain = "test" if self.target_env_type.get().lower()=="sandbox" else "login"
+        self.sf_dest = Salesforce(username=u, password=p, security_token=t, domain=domain)
+
 
 
 if __name__ == "__main__":

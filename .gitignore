@@ -8,4 +8,7 @@ __pycache__/
 *.sqlite3
 *.env
 .envrc
-*testsobjectsheet.csv
+# Ignora tutti gli xlsx, xls e csv
+*.xlsx
+*.xls
+*.csv
