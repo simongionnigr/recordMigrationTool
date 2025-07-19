@@ -7,4 +7,5 @@ query_csv:
   - - CSV file
     - '*.csv'
   separator: ;
-
+ui:
+  theme: vista

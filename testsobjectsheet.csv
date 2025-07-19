@@ -1,4 +1,0 @@
-sobject api name;soql query
-Contact;Select LastName, AccountId from Contact
-Account;Select Id, Name from Account
-Opportunity;Select Name, StageName, CloseDate, AccountId from Opportunity

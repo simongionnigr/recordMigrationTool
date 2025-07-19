@@ -8,14 +8,15 @@ import_settings:
   Opportunity:
     action: insert
     externalIdField: null
-input_tables: C:/RecordMigration/recordMigrationTool/test2.xlsx
+input_tables: C:/RecordMigration/recordMigrationTool/test7.xlsx
 import_order:
 - Account
-- Opportunity
 - Contact
+- Opportunity
 ignore_columns:
 - record_id
 - to_import
 - sf_id
 - error
 - Id
+relationships_file: C:/Users/simon/Documents/relationshipTest.csv

@@ -15,13 +15,23 @@ DEFAULT_CONFIG = {
         "prompt": "Carica file query CSV",
         "filetypes": [("CSV file", "*.csv")],
         "separator": ";"
+    },
+    "ui": {
+        "theme": "clam"
     }
 }
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
-            return yaml.safe_load(f)
+            cfg = yaml.safe_load(f) or {}
+            # merge default for missing keys
+            merged = DEFAULT_CONFIG.copy()
+            merged.update(cfg)
+            # ensure nested ui
+            merged["ui"] = DEFAULT_CONFIG["ui"].copy()
+            merged["ui"].update(cfg.get("ui", {}))
+            return merged
     return DEFAULT_CONFIG.copy()
 
 def save_config(cfg: dict):
