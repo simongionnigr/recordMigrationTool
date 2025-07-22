@@ -630,7 +630,7 @@ class MigrationToolApp(tk.Tk):
 
             import_order    = cfg.get("import_order", [])
             import_settings = cfg.get("import_settings", {})
-            ignore_cols     = cfg.get("ignore_columns", ["record_id","to_import","sf_id","error"])
+            ignore_cols     = cfg.get("ignore_columns")
 
             # --- 3) Carica i fogli con record_id già iniettato ---
             sheets = read_spreadsheet(path)
@@ -692,6 +692,8 @@ class MigrationToolApp(tk.Tk):
                         if parent != sobject or child not in sheets:
                             continue
                         child_df = sheets[child]
+                        if field not in child_df.columns:
+                            continue
                         # colonna di flag per non importare
                         if "to_import" not in child_df.columns:
                             child_df["to_import"] = True
@@ -948,8 +950,3 @@ class MigrationToolApp(tk.Tk):
         domain = "test" if self.target_env_type.get().lower()=="sandbox" else "login"
         self.sf_dest = Salesforce(username=u, password=p, security_token=t, domain=domain)
 
-
-
-if __name__ == "__main__":
-    app = MigrationToolApp()
-    app.mainloop()
