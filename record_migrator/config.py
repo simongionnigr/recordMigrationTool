@@ -13,7 +13,7 @@ CONFIG_FILE = os.getenv(
 IMPORT_CONFIG_FILE = os.getenv(
     "IMPORT_CONFIG_PATH",
     os.path.join(MODULE_DIR, "import_config.yaml")
-    #commento
+    
 )
 
 
