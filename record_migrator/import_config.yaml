@@ -1,18 +1,9 @@
-input_tables: C:/RecordMigration/recordMigrationTool/test4.xlsx
+input_tables: C:/Users/S.Piccinelli/OneDrive - Almaviva SpA/Documenti/nazioni.xlsx
 import_settings:
-  Contact:
+  Nazione__c:
     action: insert
     externalIdField: null
-  Account:
-    action: insert
-    externalIdField: null
-  Opportunity:
-    action: insert
-    externalIdField: null
-import_order:
-- Account
-- Contact
-- Opportunity
+import_order: []
 ignore_columns:
 - record_id
 - to_import

@@ -860,6 +860,8 @@ class MigrationToolApp(tk.Tk):
         # 1) Carico la configurazione di import esistente
         import_cfg = load_import_config()
 
+        import_cfg["import_order"] = []
+        save_import_config(import_cfg)
         # 2) Costruisco import_settings come prima
         settings = {}
         for sheet, vars in self.sheet_settings.items():
