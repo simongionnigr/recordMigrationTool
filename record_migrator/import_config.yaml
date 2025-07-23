@@ -1,15 +1,4 @@
-query_csv:
-  columns:
-  - sobject_api
-  - soql
-  prompt: Carica file query CSV
-  filetypes:
-  - - CSV file
-    - '*.csv'
-  separator: ;
-ui:
-  theme: vista
-input_tables: C:/RecordMigration/recordMigrationTool/test2.xlsx
+input_tables: C:/RecordMigration/recordMigrationTool/test4.xlsx
 import_settings:
   Contact:
     action: insert
@@ -31,3 +20,14 @@ ignore_columns:
 - error
 - Id
 relationships_file: C:/Users/simon/Documents/relationshipTest.csv
+query_csv:
+  columns:
+  - sobject_api
+  - soql
+  prompt: Carica file query CSV
+  filetypes:
+  - - CSV file
+    - '*.csv'
+  separator: ;
+ui:
+  theme: vista
