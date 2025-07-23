@@ -13,6 +13,7 @@ import pandas as pd
 from config import load_config, load_import_config, save_config, save_import_config, IMPORT_CONFIG_FILE,  CONFIG_FILE
 from sf_client import SalesforceClient
 from excel_utils import read_spreadsheet, write_spreadsheet
+from utility import sanitize_for_salesforce
 
 # Carica la configurazione YAML
 CONFIG = load_config()
@@ -669,8 +670,10 @@ class MigrationToolApp(tk.Tk):
                 action      = setting.get("action", "insert")
                 ext_id_fld  = setting.get("externalIdField")
 
+
+                sanitized_records = sanitize_for_salesforce(data_df,drop_empty_fields=False,keep_keys=[ext_id_fld] if ext_id_fld else None)
                 results = []
-                for idx, record in enumerate(data_df.to_dict(orient="records")):
+                for idx, record in enumerate(sanitized_records):
                     try:
                         if action=="upsert" and ext_id_fld:
                             res = self.sf_dest.__getattr__(sobject).upsert(
