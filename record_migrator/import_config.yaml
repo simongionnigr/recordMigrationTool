@@ -1,18 +1,9 @@
+input_tables: C:/Users/S.Piccinelli/OneDrive - Almaviva SpA/Documenti/nazioni.xlsx
 import_settings:
-  Contact:
+  Nazione__c:
     action: insert
     externalIdField: null
-  Account:
-    action: insert
-    externalIdField: null
-  Opportunity:
-    action: insert
-    externalIdField: null
-input_tables: C:/RecordMigration/recordMigrationTool/test7.xlsx
-import_order:
-- Account
-- Contact
-- Opportunity
+import_order: []
 ignore_columns:
 - record_id
 - to_import
@@ -20,3 +11,14 @@ ignore_columns:
 - error
 - Id
 relationships_file: C:/Users/simon/Documents/relationshipTest.csv
+query_csv:
+  columns:
+  - sobject_api
+  - soql
+  prompt: Carica file query CSV
+  filetypes:
+  - - CSV file
+    - '*.csv'
+  separator: ;
+ui:
+  theme: vista

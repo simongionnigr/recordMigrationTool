@@ -1,4 +1,4 @@
-from record_migrator.gui import MigrationToolApp
+from gui import MigrationToolApp
 
 def main():
     app = MigrationToolApp()

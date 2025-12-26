@@ -1,0 +1,22 @@
+input_tables: C:/RecordMigration/recordMigrationTool/test2.xlsx
+import_settings:
+  Contact:
+    action: insert
+    externalIdField: null
+  Account:
+    action: insert
+    externalIdField: null
+  Opportunity:
+    action: insert
+    externalIdField: null
+import_order:
+- Account
+- Contact
+- Opportunity
+ignore_columns:
+- record_id
+- to_import
+- sf_id
+- error
+- Id
+relationships_file: null

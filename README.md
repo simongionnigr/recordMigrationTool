@@ -8,7 +8,9 @@
 - Esecuzione di query SOQL da file CSV e esportazione risultati in Excel
 - Importazione massiva di dati da Excel in un ambiente Salesforce
 - Gestione automatica delle lookup relationship tra oggetti (opzionale)
+
 - Interfaccia utente dotata di temi basata su `ttkthemes`
+
 - Configurazione persistente tramite file YAML
 
 ## 📦 Installazione
@@ -67,7 +69,9 @@ requirements.txt
 
 ## 🗃️ Formato file query
 
+
 Il file CSV delle query deve contenere le seguenti colonne:
+
 
 | sobject_api | soql                         |
 |-------------|------------------------------|

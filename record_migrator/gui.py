@@ -6,12 +6,14 @@ from ttkthemes import ThemedStyle
 from simple_salesforce import Salesforce
 import yaml
 from collections import deque
+import time
 
 import pandas as pd
 
-from record_migrator.config import load_config, load_import_config, save_config, save_import_config, IMPORT_CONFIG_FILE,  CONFIG_FILE
-from record_migrator.sf_client import SalesforceClient
-from record_migrator.excel_utils import read_spreadsheet, write_spreadsheet
+from config import load_config, load_import_config, save_config, save_import_config, IMPORT_CONFIG_FILE,  CONFIG_FILE
+from sf_client import SalesforceClient
+from excel_utils import read_spreadsheet, write_spreadsheet
+from utility import sanitize_for_salesforce
 
 # Carica la configurazione YAML
 CONFIG = load_config()
@@ -21,15 +23,22 @@ class MigrationToolApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Salesforce Data Migrator")
-        self.geometry("900x600")
+        self.geometry("1920x1080")
          # inizializza lo style (ttkthemes) e la var del tema
         self.style = ThemedStyle(self)
         self.theme_var = tk.StringVar()
-
+        self.query_df = None
         # prima metto la toolbar con il selettore tema
-        self._create_toolbar()
+        thread_toolbar = threading.Thread(target=self._create_toolbar(), daemon=True)
+        thread_toolbar.start()
+
         # infine tutti gli altri widget
-        self._create_widgets()
+        thread_toolbar = threading.Thread(target=self._create_widgets(), daemon=True)
+        thread_toolbar.start()
+
+        
+        
+        
 
     def _apply_theme(self, evt=None):
         theme = self.theme_var.get()
@@ -169,6 +178,7 @@ class MigrationToolApp(tk.Tk):
 
         # Progress bar (inizialmente nascosta)
         self.progress = ttk.Progressbar(self, mode="indeterminate")
+        self.progress.pack(fill="x", padx=10, pady=(5,0))
 
         # Menu contestuale per copia cella
         self.menu = tk.Menu(self, tearoff=0)
@@ -512,16 +522,24 @@ class MigrationToolApp(tk.Tk):
 
 
     def _start_run_queries(self):
+        # ---- scelta del file di output ----
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel file","*.xlsx")]
+        )
+        if not save_path:
+            return
+
         self.run_button.config(state="disabled")
         self.progress.pack(fill="x", padx=10, pady=(5,0))
         self.progress.start(10)
 
-        thread = threading.Thread(target=self._run_queries_thread, daemon=True)
+        thread = threading.Thread(target=lambda: self._run_queries_thread(save_path), daemon=True)
         thread.start()
 
-    def _run_queries_thread(self):
+    def _run_queries_thread(self,save_path):
         try:
-            self._run_queries_logic()
+            self._run_queries_logic(save_path)
         except Exception as e:
             # se c’è un errore non previsto, lo mostriamo nella GUI
             self.after(0, lambda: messagebox.showerror("Errore", str(e)))
@@ -529,7 +547,7 @@ class MigrationToolApp(tk.Tk):
             # al termine, anche in caso di errore, ripristiniamo la UI
             self.after(0, self._on_queries_complete)
 
-    def _run_queries_logic(self):
+    def _run_queries_logic(self,save_path):
         # ---- autenticazione Salesforce ----
         try:
             self._ensure_source_connection()
@@ -538,13 +556,7 @@ class MigrationToolApp(tk.Tk):
             return
 
 
-        # ---- scelta del file di output ----
-        save_path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel file","*.xlsx")]
-        )
-        if not save_path:
-            return
+        
         self._update_config_with_input_table_path(save_path)
 
         # ---- esecuzione delle query ----
@@ -630,7 +642,7 @@ class MigrationToolApp(tk.Tk):
 
             import_order    = cfg.get("import_order", [])
             import_settings = cfg.get("import_settings", {})
-            ignore_cols     = cfg.get("ignore_columns", ["record_id","to_import","sf_id","error"])
+            ignore_cols     = cfg.get("ignore_columns")
 
             # --- 3) Carica i fogli con record_id già iniettato ---
             sheets = read_spreadsheet(path)
@@ -658,8 +670,10 @@ class MigrationToolApp(tk.Tk):
                 action      = setting.get("action", "insert")
                 ext_id_fld  = setting.get("externalIdField")
 
+
+                sanitized_records = sanitize_for_salesforce(data_df,drop_empty_fields=False,keep_keys=[ext_id_fld] if ext_id_fld else None)
                 results = []
-                for idx, record in enumerate(data_df.to_dict(orient="records")):
+                for idx, record in enumerate(sanitized_records):
                     try:
                         if action=="upsert" and ext_id_fld:
                             res = self.sf_dest.__getattr__(sobject).upsert(
@@ -692,6 +706,8 @@ class MigrationToolApp(tk.Tk):
                         if parent != sobject or child not in sheets:
                             continue
                         child_df = sheets[child]
+                        if field not in child_df.columns:
+                            continue
                         # colonna di flag per non importare
                         if "to_import" not in child_df.columns:
                             child_df["to_import"] = True
@@ -847,6 +863,8 @@ class MigrationToolApp(tk.Tk):
         # 1) Carico la configurazione di import esistente
         import_cfg = load_import_config()
 
+        import_cfg["import_order"] = []
+        save_import_config(import_cfg)
         # 2) Costruisco import_settings come prima
         settings = {}
         for sheet, vars in self.sheet_settings.items():
@@ -948,8 +966,3 @@ class MigrationToolApp(tk.Tk):
         domain = "test" if self.target_env_type.get().lower()=="sandbox" else "login"
         self.sf_dest = Salesforce(username=u, password=p, security_token=t, domain=domain)
 
-
-
-if __name__ == "__main__":
-    app = MigrationToolApp()
-    app.mainloop()
